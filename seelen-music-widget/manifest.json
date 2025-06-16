@@ -1,0 +1,11 @@
+{
+  "name": "Music Player",
+  "version": "1.0.0",
+  "author": "YourName",
+  "description": "Adapts to Seelen UI colors",
+  "ui": {
+    "adaptiveColors": true,
+    "resizable": false,
+    "defaultSize": [300, 150]
+  }
+}

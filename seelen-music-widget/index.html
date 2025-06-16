@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Music Player</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    :root {
+      --accent-color: #00bcd4;
+      --text-color: #ffffff;
+    }
+
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: 'Segoe UI', sans-serif;
+      background: transparent;
+      color: var(--text-color);
+    }
+
+    .music-player {
+      width: 100%;
+      height: 100%;
+      backdrop-filter: blur(16px);
+      background-color: rgba(0, 0, 0, 0.3);
+      border: 2px solid var(--accent-color);
+      border-radius: 12px;
+      padding: 16px;
+      box-sizing: border-box;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+
+    .album-art {
+      width: 100%;
+      aspect-ratio: 1 / 1;
+      background: var(--accent-color);
+      border-radius: 8px;
+      margin-bottom: 12px;
+      background-size: cover;
+      background-position: center;
+    }
+
+    .track-info {
+      text-align: center;
+      margin-bottom: 8px;
+    }
+
+    .title {
+      font-size: 16px;
+      font-weight: bold;
+      color: var(--text-color);
+    }
+
+    .artist {
+      font-size: 12px;
+      color: var(--text-color);
+    }
+
+    .controls {
+      display: flex;
+      justify-content: center;
+      gap: 12px;
+      margin-bottom: 8px;
+    }
+
+    button {
+      background: transparent;
+      border: none;
+      color: var(--accent-color);
+      font-size: 20px;
+      cursor: pointer;
+    }
+
+    .progress-container {
+      height: 4px;
+      width: 100%;
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+
+    .progress-bar {
+      height: 100%;
+      width: 0%;
+      background: var(--accent-color);
+      transition: width 0.3s ease;
+    }
+  </style>
+</head>
+<body>
+  <div class="music-player">
+    <div class="album-art" style="background-image: url('https://placekitten.com/300/300');"></div>
+    <div class="track-info">
+      <div class="title">Not logged in</div>
+      <div class="artist">Unknown Artist</div>
+    </div>
+    <div class="controls">
+      <button class="shuffle">🔀</button>
+      <button class="prev">⏮</button>
+      <button class="play-pause">⏯</button>
+      <button class="next">⏭</button>
+      <button class="theme">🌓</button>
+    </div>
+    <div class="progress-container">
+      <div class="progress-bar"></div>
+    </div>
+  </div>
+  <script>
+    const clientId = 'dd46e656426e4708ac2f73dd6ff2f706';
+    const redirectUri = 'https://github.com/N1yt/seelen_adaptive_music_widget';
+    const scopes = 'user-read-currently-playing user-modify-playback-state user-read-playback-state';
+
+    let accessToken;
+    let isPlaying = false;
+    let currentTheme = 'light';
+
+    function generateCodeVerifier(length = 128) {
+      const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';
+      let verifier = '';
+      for (let i = 0; i < length; i++) {
+        verifier += possible.charAt(Math.floor(Math.random() * possible.length));
+      }
+      return verifier;
+    }
+
+    async function generateCodeChallenge(codeVerifier) {
+      const encoder = new TextEncoder();
+      const data = encoder.encode(codeVerifier);
+      const digest = await crypto.subtle.digest('SHA-256', data);
+      return btoa(String.fromCharCode(...new Uint8Array(digest)))
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=+$/, '');
+    }
+
+    async function redirectToAuthCodeFlow() {
+      const verifier = generateCodeVerifier();
+      const challenge = await generateCodeChallenge(verifier);
+      localStorage.setItem('verifier', verifier);
+
+      const args = new URLSearchParams({
+        response_type: 'code',
+        client_id: clientId,
+        scope: scopes,
+        redirect_uri: redirectUri,
+        code_challenge_method: 'S256',
+        code_challenge: challenge,
+      });
+
+      window.location = `https://accounts.spotify.com/authorize?${args}`;
+    }
+
+    async function getAccessToken(code) {
+      const verifier = localStorage.getItem('verifier');
+
+      const body = new URLSearchParams({
+        grant_type: 'authorization_code',
+        code,
+        redirect_uri: redirectUri,
+        client_id: clientId,
+        code_verifier: verifier,
+      });
+
+      const response = await fetch('https://accounts.spotify.com/api/token', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
+        body: body.toString(),
+      });
+
+      const data = await response.json();
+      return data.access_token;
+    }
+
+    async function fetchTrackInfo(token) {
+      const res = await fetch("https://api.spotify.com/v1/me/player/currently-playing", {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
+
+      if (!res.ok || res.status === 204) {
+        document.querySelector(".title").textContent = "No track playing";
+        document.querySelector(".artist").textContent = "Unknown Artist";
+        isPlaying = false;
+        return;
+      }
+
+      const data = await res.json();
+      const title = data.item.name;
+      const artist = data.item.artists.map(a => a.name).join(", ");
+      const albumArt = data.item.album.images[0].url;
+      const progress = (data.progress_ms / data.item.duration_ms) * 100;
+
+      isPlaying = !data.is_playing ? false : true;
+      document.querySelector(".title").textContent = title;
+      document.querySelector(".artist").textContent = artist;
+      document.querySelector(".album-art").style.backgroundImage = `url(${albumArt})`;
+      document.querySelector(".progress-bar").style.width = `${progress}%`;
+    }
+
+    async function controlPlayback(action) {
+      if (!accessToken) return;
+      let endpoint = '';
+
+      switch (action) {
+        case 'play': endpoint = 'play'; break;
+        case 'pause': endpoint = 'pause'; break;
+        case 'next': endpoint = 'next'; break;
+        case 'previous': endpoint = 'previous'; break;
+        case 'shuffle': endpoint = 'shuffle?state=true'; break;
+      }
+
+      await fetch(`https://api.spotify.com/v1/me/player/${endpoint}`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        }
+      });
+    }
+
+    async function togglePlayback() {
+      if (isPlaying) {
+        await controlPlayback('pause');
+        isPlaying = false;
+      } else {
+        await controlPlayback('play');
+        isPlaying = true;
+      }
+    }
+
+    function toggleTheme() {
+      currentTheme = currentTheme === 'light' ? 'dark' : 'light';
+      if (currentTheme === 'dark') {
+        document.documentElement.style.setProperty('--text-color', '#ffffff');
+        document.body.style.backgroundColor = 'transparent';
+      } else {
+        document.documentElement.style.setProperty('--text-color', '#111111');
+        document.body.style.backgroundColor = '#eeeeee';
+      }
+    }
+
+    async function main() {
+      const params = new URLSearchParams(window.location.search);
+      const code = params.get('code');
+
+      if (!code) {
+        redirectToAuthCodeFlow();
+      } else {
+        accessToken = await getAccessToken(code);
+        setInterval(() => fetchTrackInfo(accessToken), 5000);
+
+        document.querySelector('.play-pause').addEventListener('click', togglePlayback);
+        document.querySelector('.next').addEventListener('click', () => {
+          controlPlayback('next');
+        });
+        document.querySelector('.prev').addEventListener('click', () => {
+          controlPlayback('previous');
+        });
+        document.querySelector('.shuffle').addEventListener('click', () => {
+          controlPlayback('shuffle');
+        });
+        document.querySelector('.theme').addEventListener('click', toggleTheme);
+      }
+    }
+
+    main();
+  </script>
+</body>
+</html>
